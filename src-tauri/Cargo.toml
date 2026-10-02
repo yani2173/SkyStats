@@ -1,6 +1,6 @@
 [package]
 name = "skystats"
-version = "0.9.0"
+version = "0.9.1"
 description = "VATSIM flight status for Discord"
 authors = ["SkyStats contributors"]
 edition = "2021"

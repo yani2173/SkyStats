@@ -1529,7 +1529,7 @@ export default function App() {
                     <SkyStatsMark size={36} />
                     <div>
                       <Title order={4} fw={700}>SkyStats</Title>
-                      <Text size="xs" c="dimmed">Version 0.9.0 - Tauri v2 Desktop</Text>
+                      <Text size="xs" c="dimmed">Version 0.9.1 - Tauri v2 Desktop</Text>
                     </div>
                   </Group>
 

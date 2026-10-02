@@ -106,6 +106,27 @@ describe('flight display logic', () => {
     expect(getSmartStatus({ ...base, phase: 'Cruising', latitude: 50.0, longitude: -30.0 }, defaultSettings)).toBe('Crossing the North Atlantic at FL360');
   });
 
+  it('strictly treats groundspeed < 40 kts as on the ground (preventing false airborne cruise after flight restart)', () => {
+    const groundFlight: FlightState = {
+      ...flight,
+      departure: 'LBSF',
+      departureName: 'Sofia',
+      arrival: 'EDDF',
+      arrivalName: 'Frankfurt',
+      altitude: 2000,
+      groundspeed: 0,
+      phase: 'Flying', // Even if stale phase said Flying
+    };
+    expect(getSmartStatus(groundFlight, defaultSettings)).toBe('At Gate - Sofia');
+
+    const taxiFlight: FlightState = {
+      ...groundFlight,
+      groundspeed: 15,
+      phase: 'Cruising', // Even if stale phase said Cruising
+    };
+    expect(getSmartStatus(taxiFlight, defaultSettings)).toBe('Taxiing at Sofia');
+  });
+
   it('populates flight_time template token when elapsed time is available', () => {
     const activeFlight: FlightState = {
       ...flight,

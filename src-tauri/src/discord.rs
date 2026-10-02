@@ -576,7 +576,9 @@ pub fn get_smart_status(flight: &FlightState, settings: &Settings) -> String {
             "Climbing".into()
         };
     }
-    if phase.contains("cruise") || phase.contains("cruising") || phase.contains("en route") {
+    if (phase.contains("cruise") || phase.contains("cruising") || phase.contains("en route"))
+        && !flight.groundspeed.is_some_and(|s| s < 40)
+    {
         if let Some(c) = country {
             let verb = if c.starts_with("the ") { "Crossing" } else { "Cruising over" };
             return if let Some(f) = fl {
@@ -604,6 +606,21 @@ pub fn get_smart_status(flight: &FlightState, settings: &Settings) -> String {
             return format!("Taxiing at {origin}");
         }
         return "Preparing for Departure".into();
+    }
+    // Ground safety check: if groundspeed is under 40 kts or phase indicates ground/gate, aircraft is definitively on the ground
+    if flight.groundspeed.is_some_and(|s| s < 40) || phase.contains("ground") || phase.contains("gate") {
+        if flight.groundspeed.is_some_and(|s| s < 3) || phase.contains("gate") {
+            return if let Some(ref origin) = dep_display {
+                format!("At Gate - {origin}")
+            } else {
+                "At Gate".into()
+            };
+        }
+        return if let Some(ref origin) = dep_display {
+            format!("Taxiing at {origin}")
+        } else {
+            "Taxiing".into()
+        };
     }
     if let Some(c) = country {
         let verb = if c.starts_with("the ") { "Crossing" } else { "Flying over" };
@@ -938,6 +955,35 @@ mod tests {
         assert_eq!(
             render_template(&settings.details_template, &no_airports, &settings),
             "VATSIM"
+        );
+    }
+
+    #[test]
+    fn groundspeed_below_40_is_treated_as_ground() {
+        let ground_flight = FlightState {
+            callsign: Some("RYR8AB".into()),
+            departure: Some("LBSF".into()),
+            departure_name: Some("Sofia".into()),
+            groundspeed: Some(0),
+            phase: "Flying".into(),
+            ..FlightState::default()
+        };
+        assert_eq!(
+            get_smart_status(&ground_flight, &Settings::default()),
+            "At Gate - Sofia"
+        );
+
+        let taxi_flight = FlightState {
+            callsign: Some("RYR8AB".into()),
+            departure: Some("LBSF".into()),
+            departure_name: Some("Sofia".into()),
+            groundspeed: Some(15),
+            phase: "Cruising".into(),
+            ..FlightState::default()
+        };
+        assert_eq!(
+            get_smart_status(&taxi_flight, &Settings::default()),
+            "Taxiing at Sofia"
         );
     }
 }

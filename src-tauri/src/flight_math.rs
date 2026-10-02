@@ -63,6 +63,10 @@ pub fn great_circle_nm(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
 
 pub struct FlightTracker {
     last_cid: Option<u32>,
+    last_callsign: Option<String>,
+    last_departure: Option<String>,
+    last_arrival: Option<String>,
+    last_logon_time: Option<String>,
     last_altitude: Option<i32>,
     last_update: Option<DateTime<Utc>>,
     smoothed_speed: Option<f64>,
@@ -77,6 +81,10 @@ impl FlightTracker {
     pub fn new() -> Self {
         Self {
             last_cid: None,
+            last_callsign: None,
+            last_departure: None,
+            last_arrival: None,
+            last_logon_time: None,
             last_altitude: None,
             last_update: None,
             smoothed_speed: None,
@@ -89,9 +97,21 @@ impl FlightTracker {
     }
 
     pub fn update(&mut self, flight: &mut FlightState, now: DateTime<Utc>) {
-        if self.last_cid != flight.cid {
-            *self = Self::new();
-            self.last_cid = flight.cid;
+        let is_new_flight = self.last_cid != flight.cid
+            || self.last_callsign != flight.callsign
+            || self.last_departure != flight.departure
+            || self.last_arrival != flight.arrival
+            || (flight.logon_time.is_some() && self.last_logon_time != flight.logon_time);
+
+        if is_new_flight {
+            *self = Self {
+                last_cid: flight.cid,
+                last_callsign: flight.callsign.clone(),
+                last_departure: flight.departure.clone(),
+                last_arrival: flight.arrival.clone(),
+                last_logon_time: flight.logon_time.clone(),
+                ..Self::new()
+            };
         }
         let (lat, lon) = match (flight.latitude, flight.longitude) {
             (Some(lat), Some(lon)) => (lat, lon),
@@ -175,8 +195,18 @@ impl FlightTracker {
             _ => 0.0,
         };
 
+        // Automatic turnaround / new flight ground reset:
+        // If speed < 40 kts and near departure, or stopped at gate, reset airborne status
+        if speed < 40 {
+            if distance_departure.is_some_and(|d| d < 10.0) {
+                self.was_airborne = false;
+            } else if (self.phase == "Arrived at Gate" || self.phase == "Landed" || self.phase == "On Gate") && speed < 3 {
+                self.was_airborne = false;
+            }
+        }
+
         // Record initial elevation on the ground at departure
-        if !self.was_airborne && speed < 35 && self.departure_elevation.is_none() {
+        if !self.was_airborne && speed < 35 && (self.departure_elevation.is_none() || distance_departure.is_some_and(|d| d < 10.0)) {
             self.departure_elevation = Some(altitude);
         }
 
@@ -193,13 +223,28 @@ impl FlightTracker {
             }
         }
 
-        let next_phase = if !self.was_airborne {
-            if speed < 3 {
+        let next_phase = if speed < 40 {
+            // Definitively on the ground (taxiing or parked)
+            if !self.was_airborne || distance_departure.is_some_and(|d| d < 10.0) {
+                if speed < 3 {
+                    "On Gate"
+                } else {
+                    "Taxiing"
+                }
+            } else if distance_arrival.is_some_and(|d| d < 10.0) {
+                if speed < 3 {
+                    "Arrived at Gate"
+                } else {
+                    "Taxiing to Gate"
+                }
+            } else if speed < 3 {
                 "On Gate"
-            } else if speed >= 40 && distance_departure.is_some_and(|d| d < 4.0) && climbed < 250 {
-                "Takeoff Roll"
-            } else if speed < 40 && (distance_departure.is_none() || distance_departure.is_some_and(|d| d < 12.0)) {
+            } else {
                 "Taxiing"
+            }
+        } else if !self.was_airborne {
+            if speed >= 40 && distance_departure.is_some_and(|d| d < 4.0) && climbed < 250 {
+                "Takeoff Roll"
             } else if (speed >= 40 && distance_departure.is_some_and(|d| d < 15.0))
                 || (climb_rate > 280.0 && distance_departure.is_some_and(|d| d < 15.0))
             {
@@ -208,10 +253,10 @@ impl FlightTracker {
                 self.was_airborne = true;
                 "Climbing"
             } else {
-                "On Gate"
+                "Taxiing"
             }
         } else {
-            // Check for go-around from approach
+            // Truly airborne (speed >= 40 kts and was_airborne is true)
             let prev_was_approach = self.phase == "Short Final" || self.phase == "Final Approach" || self.phase == "Approach";
             if prev_was_approach && climb_rate > 400.0 && speed >= 80 {
                 "Go-Around"
@@ -219,13 +264,9 @@ impl FlightTracker {
                 || ((self.phase == "Final Approach" || self.phase == "Short Final") && speed < 80 && distance_arrival.is_some_and(|d| d < 5.0))
             {
                 "Landed"
-            } else if speed < 3 && (distance_arrival.is_none() || distance_arrival.is_some_and(|d| d < 6.0)) {
-                "Arrived at Gate"
-            } else if speed < 38 && (distance_arrival.is_none() || distance_arrival.is_some_and(|d| d < 8.0)) {
-                "Taxiing to Gate"
-            } else if distance_arrival.is_some_and(|d| d <= 4.0) && speed >= 45 && speed < 190 && climb_rate <= 300.0 {
+            } else if distance_arrival.is_some_and(|d| d <= 4.0) && speed < 190 && climb_rate <= 300.0 {
                 "Short Final"
-            } else if distance_arrival.is_some_and(|d| d <= 12.0) && speed >= 45 && speed < 210 && climb_rate <= 300.0 {
+            } else if distance_arrival.is_some_and(|d| d <= 12.0) && speed < 210 && climb_rate <= 300.0 {
                 "Final Approach"
             } else if distance_arrival.is_some_and(|d| d <= 35.0) && climb_rate <= 200.0 {
                 "Approach"
@@ -233,7 +274,7 @@ impl FlightTracker {
                 "Climbing"
             } else if climb_rate < -250.0 {
                 "Descending"
-            } else if altitude >= 5000 && climb_rate.abs() <= 250.0 {
+            } else if altitude >= 5000 && climb_rate.abs() <= 250.0 && speed >= 80 {
                 "Cruising"
             } else {
                 "Flying"
@@ -241,7 +282,7 @@ impl FlightTracker {
         };
 
         let threshold = match next_phase {
-            "Landed" | "Departing" | "Final Approach" | "Short Final" | "Takeoff Roll" | "On Gate" | "Arrived at Gate" | "Go-Around" => 1,
+            "Landed" | "Departing" | "Final Approach" | "Short Final" | "Takeoff Roll" | "On Gate" | "Arrived at Gate" | "Go-Around" | "Taxiing" | "Taxiing to Gate" => 1,
             _ => 2,
         };
 

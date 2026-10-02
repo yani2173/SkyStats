@@ -436,7 +436,6 @@ export function getSmartStatus(flight: FlightState | null, settings: Settings): 
   const format = settings.airportFormat ?? 'name';
   const arrDisplay = formatAirportDisplay(flight.arrival, flight.arrivalName, format);
   const depDisplay = formatAirportDisplay(flight.departure, flight.departureName, format);
-
   // Post-flight ground states (use arrival airport)
   if (phase.includes('arrived at gate')) {
     return arrDisplay ? `Arrived at ${arrDisplay}` : 'Arrived at Gate';
@@ -503,7 +502,10 @@ export function getSmartStatus(flight: FlightState | null, settings: Settings): 
     if (country) return `Climbing over ${country}${fl ? ` - Passing ${fl}` : ''}`;
     return depDisplay ? `Climbing out of ${depDisplay}${fl ? ` - Passing ${fl}` : ''}` : `Climbing${fl ? ` - Passing ${fl}` : ''}`;
   }
-  if (phase.includes('cruise') || phase.includes('en route') || phase.includes('cruising')) {
+  if (
+    (phase.includes('cruise') || phase.includes('en route') || phase.includes('cruising')) &&
+    (flight.groundspeed === null || flight.groundspeed === undefined || flight.groundspeed >= 40)
+  ) {
     if (country) {
       const verb = country.startsWith('the ') ? 'Crossing' : 'Cruising over';
       return `${verb} ${country}${fl ? ` at ${fl}` : ''}`;
@@ -515,6 +517,20 @@ export function getSmartStatus(flight: FlightState | null, settings: Settings): 
   if (phase.includes('taxi') || phase.includes('preflight') || phase.includes('boarding') || phase.includes('pushing back')) {
     if (depDisplay) return `Taxiing at ${depDisplay}`;
     return 'Preparing for Departure';
+  }
+  // Ground safety check: if groundspeed is under 40 kts or phase indicates ground/gate, aircraft is definitively on the ground
+  if (
+    (flight.groundspeed !== null && flight.groundspeed !== undefined && flight.groundspeed < 40) ||
+    phase.includes('ground') ||
+    phase.includes('gate')
+  ) {
+    if (
+      (flight.groundspeed !== null && flight.groundspeed !== undefined && flight.groundspeed < 3) ||
+      phase.includes('gate')
+    ) {
+      return depDisplay ? `At Gate - ${depDisplay}` : 'At Gate';
+    }
+    return depDisplay ? `Taxiing at ${depDisplay}` : 'Taxiing';
   }
   if (country) {
     const verb = country.startsWith('the ') ? 'Crossing' : 'Flying over';

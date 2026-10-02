@@ -87,6 +87,8 @@ fn find_pilot(pilots: Vec<Pilot>, cid: u32) -> Option<FlightState> {
                 elapsed_time,
                 phase: if pilot.groundspeed < 5 {
                     "On ground"
+                } else if pilot.groundspeed < 40 {
+                    "Taxiing"
                 } else if pilot.altitude < 10000 {
                     "Flying"
                 } else {
